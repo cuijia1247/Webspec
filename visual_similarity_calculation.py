@@ -11,7 +11,7 @@
     python visual_similarity_calculation.py
     python visual_similarity_calculation.py \\
         --dir1 data/ours/snapshot --dir2 data/images_origin \\
-        --output data/results.md
+        --output results.md
 """
 
 from __future__ import annotations
@@ -188,8 +188,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--output",
         type=Path,
-        default=_REPO_ROOT / "data" / "results.md",
-        help="输出 Markdown 路径（默认: data/results.md）",
+        default=_REPO_ROOT / "results.md",
+        help="输出 Markdown 路径（默认: 项目根目录 results.md）",
     )
     p.add_argument("--model", type=str, default=DEFAULT_MODEL_ID, help="Hugging Face CLIP 模型 ID")
     p.add_argument("--cache_dir", type=str, default=DEFAULT_CACHE_DIR, help="预训练模型根目录")

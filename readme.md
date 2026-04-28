@@ -1,88 +1,112 @@
-# Web UI 视觉相似度工具
+# Web UI 视觉相似度工具（WebSpec）
 
-本目录用于对 **Web UI 截图/设计稿** 等成对图像计算 **视觉相似度**，便于对比原稿与生成稿、不同版本界面或 A/B 稿的一致性。
+本仓库用于对 **Web UI 截图/设计稿** 等图像做 **视觉相似度** 计算与简单数据整理：双图 CLIP / DINOv2 打分、按目录批量 CLIP 报表、从 SCUT 目录按主文件名过滤拷贝。
 
-当前提供两种基于深度视觉特征的度量方式：
-
-| 方式 | 脚本 |  backbone | 特点 |
-|------|------|-----------|------|
-| **CLIP** | `vs_clip_score.py` | 默认 `openai/clip-vit-base-patch16` | 图文联合训练，对「语义级」布局与内容较敏感，可按需切换 HF 上其他 CLIP 变体。 |
-| **DINOv2** | `vs_codino_score.py` | 默认 `dinov2_vitb14`（Torch Hub） | 自监督视觉表征，对纹理、结构、细粒度外观往往更稳；可选 s/b/l/g 规模。 |
-
-两者均对两张图分别提取 **归一化图像特征**，再计算 **余弦相似度**（输出约在 \([-1, 1]\)，实际多为正且接近 1 表示更相似）。脚本内会对分数给出粗粒度文字档位，仅供参考。
+**运行前请在项目根目录 `Webspec/` 下打开终端**（保证相对路径 `./pretrainedModels`、`./data` 与脚本一致）。
 
 ---
 
 ## 环境与依赖
 
-建议在虚拟环境中安装：
-
 ```bash
 pip install torch torchvision pillow
-# CLIP 脚本额外需要：
 pip install transformers huggingface_hub
 ```
 
-- **CUDA**：若已安装 GPU 版 PyTorch，脚本会自动优先使用 `cuda`。
-- **网络**：首次运行会下载预训练权重；国内可对 CLIP 使用脚本默认的 Hugging Face 镜像，对 DINOv2 可配合 `--proxy`。
+有 NVIDIA GPU 时可安装带 CUDA 的 PyTorch；脚本会自动优先使用 `cuda`。
 
 ---
 
-## 预训练模型目录
+## 预训练权重目录
 
-两种脚本默认将权重放在项目下的 **`./pretrainedModels/`**（相对于你执行命令时的当前工作目录）：
+默认使用项目下的 **`./pretrainedModels/`**（相对于当前工作目录）：
 
-- **CLIP**：`snapshot_download` 到 `pretrainedModels/<模型子目录>/`（如 `clip-vit-base-patch16`）。若本地已有完整文件则跳过下载。
-- **DINOv2**：通过 `torch.hub.set_dir` 指定根目录为 `pretrainedModels`，实际缓存位于 `pretrainedModels/hub/`。
-
-可用 `--cache_dir`（两个脚本均支持）改为其他路径。
-
----
-
-## 使用方法
-
-### 1. CLIP 视觉相似度
-
-```bash
-python vs_clip_score.py --img1 path/to/ui_a.png --img2 path/to/ui_b.png
-```
-
-常用参数：
-
-- `--model`：Hugging Face 模型 ID，默认 `openai/clip-vit-base-patch16`；可选如 `openai/clip-vit-base-patch32`、`openai/clip-vit-large-patch14`。
-- `--cache_dir`：预训练根目录，默认 `./pretrainedModels`。
-- `--proxy`：下载走代理，例如 `http://127.0.0.1:7890`。
-- `--hf_endpoint`：HF 端点，默认 `https://hf-mirror.com`。
-- `--device`：`cuda` / `cpu`，默认自动。
-
-### 2. DINOv2 视觉相似度（`vs_codino_score.py`）
-
-```bash
-python vs_codino_score.py --img1 path/to/ui_a.png --img2 path/to/ui_b.png
-```
-
-常用参数：
-
-- `--model`：`dinov2_vits14` | `dinov2_vitb14`（默认）| `dinov2_vitl14` | `dinov2_vitg14`。
-- `--image_size`：输入边长，默认 `224`（脚本使用 `Resize`，避免裁切丢失 UI 边缘信息）。
-- `--cache_dir`：Torch Hub 根目录，默认 `./pretrainedModels`。
-- `--proxy`：同上。
-- `--device`：同上。
-
----
-
-## 结果解读（简要）
-
-- **分数越高**：两图在对应特征空间越接近，一般可理解为视觉越相似。
-- **CLIP 与 DINOv2 不可直接横向比绝对值**：二者特征定义不同，更适合在同一指标下做 **相对排序** 或与各自阈值对比。
-- **业务结论** 应结合具体阈值与人工抽查标定；脚本中的 `Very high` / `High` 等档位为启发式提示。
-
----
-
-## 文件说明
-
-| 文件 | 说明 |
+| 用途 | 说明 |
 |------|------|
-| `vs_clip_score.py` | 基于 Transformers CLIP 的双图余弦相似度 |
-| `vs_codino_score.py` | 基于 Torch Hub DINOv2 的双图余弦相似度 |
+| CLIP | Hugging Face `snapshot_download` 到 `pretrainedModels/<模型子目录>/` |
+| DINOv2 | `torch.hub` 缓存，一般在 `pretrainedModels/hub/` 等子路径 |
+
+首次运行需联网下载；国内可配合 CLIP 的 `--hf_endpoint`、`--proxy`，以及 DINOv2 的 `--proxy`。仓库的 `.gitignore` 已忽略 `pretrainedModels/` 与 `data/`，不纳入 Git。
+
+---
+
+## 脚本运行说明
+
+### 1. 单对图像 — CLIP（`utils/vs_clip_score.py`）
+
+```bash
+python utils/vs_clip_score.py --img1 path/to/a.png --img2 path/to/b.png
+```
+
+常用参数：`--model`（默认 `openai/clip-vit-base-patch16`）、`--cache_dir`、`--proxy`、`--hf_endpoint`（默认 `https://hf-mirror.com`）、`--device`。
+
+```bash
+python utils/vs_clip_score.py --img1 a.png --img2 b.png --proxy http://127.0.0.1:7890
+```
+
+### 2. 单对图像 — DINOv2（`utils/vs_codino_score.py`）
+
+```bash
+python utils/vs_codino_score.py --img1 path/to/a.png --img2 path/to/b.png
+```
+
+常用参数：`--model`（默认 `dinov2_vitb14`）、`--cache_dir`、`--proxy`、`--image_size`（默认 224）、`--device`。
+
+### 3. 批量 CLIP 报表（`visual_similarity_calculation.py`，项目根目录）
+
+对两个文件夹中 **主文件名相同（`Path.stem`，不要求扩展名一致）** 的图片逐对计算 CLIP 余弦相似度，写入 Markdown（表列为「主文件名 + 相似度」，文末含统计摘要）。
+
+```bash
+python visual_similarity_calculation.py --help
+```
+
+典型用法（请按本机实际目录修改）：
+
+```bash
+python visual_similarity_calculation.py \
+  --dir1 data/ours/snapshot \
+  --dir2 data/images_origin \
+  --output results.md
+```
+
+- `--dir1` / `--dir_a`：文件夹 1；`--dir2` / `--dir_b`：文件夹 2。  
+- `--output`：报告 Markdown 路径，默认项目根目录 **`results.md`**。  
+- 其余与 CLIP 一致：`--model`、`--cache_dir`、`--proxy`、`--hf_endpoint`、`--device`。
+
+> 脚本内 `--dir1` / `--dir2` 的默认值以 `python visual_similarity_calculation.py --help` 为准；若与你目录不一致，请始终显式传入 `--dir1` / `--dir2`。
+
+### 4. SCUT 产出过滤拷贝（`utils/filter.py`）
+
+以 `data/images_origin/` 下文件 **主名（无后缀）** 为基准，从 `data/ours/SCUT_llm/` 下匹配并复制到 `data/ours/` 对应子目录（图片 → `snapshot/`，HTML → `html/`，spec → `spec/`）。输出文件名为「origin 主名 + SCUT 源文件后缀」。
+
+```bash
+python utils/filter.py
+python utils/filter.py --dry-run
+python utils/filter.py --skip-html
+python utils/filter.py --skip-spec
+```
+
+可用 `--origin`、`--source`、`--dest`、`--html-source`、`--html-dest`、`--spec-source`、`--spec-dest` 覆盖默认路径（见 `python utils/filter.py --help`）。
+
+---
+
+## 方法简介
+
+| 方式 | 脚本 | 默认骨干 | 特点（简要） |
+|------|------|-----------|----------------|
+| CLIP | `utils/vs_clip_score.py` | ViT-B/16 | 语义/内容与布局倾向更明显 |
+| DINOv2 | `utils/vs_codino_score.py` | `dinov2_vitb14` | 纹理与细粒度外观更敏感 |
+
+二者均为 **L2 归一化后的余弦相似度**；分数区间与「高低」不宜跨模型直接对比绝对值，更适合同一指标内排序或自建阈值。
+
+---
+
+## 仓库结构（与脚本相关）
+
+| 路径 | 说明 |
+|------|------|
+| `utils/vs_clip_score.py` | 单对 CLIP 相似度 |
+| `utils/vs_codino_score.py` | 单对 DINOv2 相似度 |
+| `utils/filter.py` | 按主名从 SCUT 目录拷贝至 `data/ours/…` |
+| `visual_similarity_calculation.py` | 两目录批量 CLIP + `results.md` |
 | `readme.md` | 本说明 |

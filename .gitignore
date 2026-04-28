@@ -8,3 +8,7 @@ __pycache__/
 *$py.class
 venv/
 .venv/
+
+# 脚本生成的相似度报告（根目录）
+/results.md
+/*_results.md
