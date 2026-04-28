@@ -1,0 +1,10 @@
+# 数据集与下载的预训练权重不纳入版本库
+/data/
+/pretrainedModels/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
