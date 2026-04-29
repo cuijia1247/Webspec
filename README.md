@@ -56,6 +56,8 @@ python utils/vs_codino_score.py --img1 path/to/a.png --img2 path/to/b.png
 
 对两个文件夹中 **主文件名相同（`Path.stem`，不要求扩展名一致）** 的图片逐对计算 CLIP 余弦相似度，写入 Markdown（表列为「主文件名 + 相似度」，文末含统计摘要）。
 
+脚本会通过查找 `utils/vs_clip_score.py` **自动定位仓库根目录**，相对路径 `./data`、`--output` 等均相对于该根目录解析。
+
 ```bash
 python visual_similarity_calculation.py --help
 ```
@@ -69,15 +71,25 @@ python visual_similarity_calculation.py \
   --output results.md
 ```
 
-- `--dir1` / `--dir_a`：文件夹 1；`--dir2` / `--dir_b`：文件夹 2。  
+- `--dir1` / `--dir_a`：文件夹 1；`--dir2` / `--dir_b`：文件夹 2（默认：`data/images_origin/`）。  
 - `--output`：报告 Markdown 路径，默认项目根目录 **`results.md`**。  
 - 其余与 CLIP 一致：`--model`、`--cache_dir`、`--proxy`、`--hf_endpoint`、`--device`。
 
-> 脚本内 `--dir1` / `--dir2` 的默认值以 `python visual_similarity_calculation.py --help` 为准；若与你目录不一致，请始终显式传入 `--dir1` / `--dir2`。
+若某一主文件名在单侧目录中出现多个图片文件，会按全名字典序择优保留其一并打印警告（与下方 `filter.py` 行为一致）。
+
+> 脚本内 `--dir1` / `--dir2` 的默认值以 `python visual_similarity_calculation.py --help` 为准（代码中可对不同 baseline snapshot 留有注释占位）；若与你目录不一致，请始终显式传入 `--dir1` / `--dir2`。
 
 ### 4. SCUT 产出过滤拷贝（`utils/filter.py`）
 
-以 `data/images_origin/` 下文件 **主名（无后缀）** 为基准，从 `data/ours/SCUT_llm/` 下匹配并复制到 `data/ours/` 对应子目录（图片 → `snapshot/`，HTML → `html/`，spec → `spec/`）。输出文件名为「origin 主名 + SCUT 源文件后缀」。
+以 `data/images_origin/` 下文件 **主名（无后缀）** 为基准，从 `data/ours/SCUT_llm/` 下三路匹配并复制到 `data/ours/` 对应位置：
+
+| 类型 | SCUT 源（默认） | 输出（默认） |
+|------|-----------------|--------------|
+| 图片 | `data/ours/SCUT_llm/snapshot/` | `data/ours/snapshot/` |
+| HTML | `data/ours/SCUT_llm/html/` | `data/ours/html/` |
+| Spec | `data/ours/SCUT_llm/spec/` | `data/ours/spec/` |
+
+输出文件名为「origin 主名 + SCUT 源文件后缀」，保证内容与后缀一致。
 
 ```bash
 python utils/filter.py
@@ -87,6 +99,20 @@ python utils/filter.py --skip-spec
 ```
 
 可用 `--origin`、`--source`、`--dest`、`--html-source`、`--html-dest`、`--spec-source`、`--spec-dest` 覆盖默认路径（见 `python utils/filter.py --help`）。
+
+---
+
+## 归档：视觉相似度 Markdown 报告（`results/visual_similarity/`）
+
+将各模型 / 实验的 **批量 CLIP 报表** 汇总在 `results/visual_similarity/` 下，便于对比与引用（数据仍依赖本地 `data/`，仅报告入仓）。当前包含例如：
+
+| 文件 | 说明（概览） |
+|------|----------------|
+| `ours_before_results.md` / `ours_after_results.md` | 本方法前后或其他对照 |
+| `gimini_results.md`、`glm_results.md`、`internVL_results.md`、`qwenvl_results.md` 等 | 各基线模型 snapshot 相对 `data/images_origin` 的相似度表 |
+| `gpt4o_results.md`、`gpt4omini_results.md`、`LLaVA_results.md` | 其他 API / 模型结果 |
+
+根目录下由脚本 **新生成** 的 `results.md`、以及 `*_results.md` 仍由 `.gitignore` 忽略，避免覆盖本地实验输出；需要长期保留时请复制到 `results/visual_similarity/` 或改名后再提交。
 
 ---
 
@@ -107,6 +133,7 @@ python utils/filter.py --skip-spec
 |------|------|
 | `utils/vs_clip_score.py` | 单对 CLIP 相似度 |
 | `utils/vs_codino_score.py` | 单对 DINOv2 相似度 |
-| `utils/filter.py` | 按主名从 SCUT 目录拷贝至 `data/ours/…` |
-| `visual_similarity_calculation.py` | 两目录批量 CLIP + `results.md` |
-| `readme.md` | 本说明 |
+| `utils/filter.py` | 按主名从 SCUT_llm（snapshot/html/spec）拷贝至 `data/ours/…` |
+| `visual_similarity_calculation.py` | 两目录批量 CLIP，输出 Markdown |
+| `results/visual_similarity/` | 归档的各 baseline 批量 CLIP 报告（Markdown） |
+| `README.md` | 本说明 |

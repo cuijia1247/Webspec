@@ -26,11 +26,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_ORIGIN = REPO_ROOT / "data" / "images_origin"
-DEFAULT_IMAGE_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "SCUT_llm_image"
+DEFAULT_IMAGE_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "snapshot"
 DEFAULT_IMAGE_DEST = REPO_ROOT / "data" / "ours" / "snapshot"
-DEFAULT_HTML_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "SCUT_llm_html"
+DEFAULT_HTML_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "html"
 DEFAULT_HTML_DEST = REPO_ROOT / "data" / "ours" / "html"
-DEFAULT_SPEC_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "SCUT_llm_spec"
+DEFAULT_SPEC_SOURCE = REPO_ROOT / "data" / "ours" / "SCUT_llm" / "spec"
 DEFAULT_SPEC_DEST = REPO_ROOT / "data" / "ours" / "spec"
 
 # 兼容旧参数名：--source / --dest 仍表示图片链路

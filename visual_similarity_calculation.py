@@ -173,8 +173,14 @@ def parse_args() -> argparse.Namespace:
         "--dir_a",
         type=Path,
         dest="dir1",
-        # default=_REPO_ROOT / "data" / "ours" / "snapshot",#ours
-        default=_REPO_ROOT / "data" / "gemini3-1" / "snapshot",
+        default=_REPO_ROOT / "data" / "ours" / "snapshot",#ours
+        # default=_REPO_ROOT / "data" / "gemini3-1" / "snapshot", #gemini3-1
+        # default=_REPO_ROOT / "data" / "GLM" / "snapshot", #glm
+        # default=_REPO_ROOT / "data" / "internVL" / "snapshot", #internVL
+        # default=_REPO_ROOT / "data" / "QwenVL" / "snapshot", #QwenVL
+        # default=_REPO_ROOT / "data" / "gpt4o" / "snapshot", #gpt4o
+        # default=_REPO_ROOT / "data" / "gpt4omini" / "snapshot", #gpt4omini
+        # default=_REPO_ROOT / "data" / "LLaVA" / "snapshot", #LLaVA
         help="图文件夹 1（默认: data/ours/snapshot/）",
     )
     p.add_argument(
