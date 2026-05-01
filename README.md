@@ -26,7 +26,7 @@ pip install transformers huggingface_hub
 | CLIP | Hugging Face `snapshot_download` 到 `pretrainedModels/<模型子目录>/` |
 | DINOv2 | `torch.hub` 缓存，一般在 `pretrainedModels/hub/` 等子路径 |
 
-首次运行需联网下载；国内可配合 CLIP 的 `--hf_endpoint`、`--proxy`，以及 DINOv2 的 `--proxy`。仓库的 `.gitignore` 已忽略 `pretrainedModels/`、`data/` 与 **`output/`**（脚本产物目录，如五分区可视化），不纳入 Git。
+首次运行需联网下载；国内可配合 CLIP 的 `--hf_endpoint`、`--proxy`，以及 DINOv2 的 `--proxy`。仓库的 `.gitignore` 已忽略 `pretrainedModels/`、`data/` 与 **`output/`**（脚本产物目录，如 `output/level1/` 五分区可视化、`output/components/` 组件检测图），不纳入 Git。
 
 ---
 
@@ -120,6 +120,25 @@ python utils/five_dicts_predict.py --auto --input-dir data/images_origin
 
 常用参数：`--model`、`--conf`、`--output`、`--show`（单张模式）。详细见 `python utils/five_dicts_predict.py --help`。
 
+### 6. UI 组件框检测（`utils/components_predict.py`，Ultralytics YOLO）
+
+对网页截图做 **UI 控件/组件** 多类检测（类别与训练数据 YAML 一致，默认参考 `pretrainedModels/yolo/models/ui_tag_data.yaml`）。权重默认 `pretrainedModels/yolo/models/best.pt`。可视化写入 **`output/components/`**（同级于五分区结果的 `output/level1/`，均在 `.gitignore` 的 `output/` 下）。
+
+加载旧版 `best.pt` 时若 pickle 中模块名为 `auto_component.*`，脚本会通过 **`utils/register_auto_component_alias.py`** 在导入后映射到 `ultralytics`，避免 `ModuleNotFoundError`（该文件已纳入 Git；`pretrainedModels/` 整体仍默认不入库）。
+
+**标签绘制**：优先使用系统中的 Noto CJK / 文泉驿等本地字体；若无中文字体，则退化为「类 id + 置信度」，避免 Ultralytics 默认逻辑联网下载字体导致卡住。
+
+建议在已安装 `ultralytics`、`opencv-python`、`pyyaml` 的 conda 环境中运行；需要中文标签时可安装系统字体包（如 `fonts-noto-cjk`）。
+
+单张与批量：
+
+```bash
+python utils/components_predict.py -i path/to/screenshot.png
+python utils/components_predict.py --auto --input-dir data/images_origin
+```
+
+详细参数见 `python utils/components_predict.py --help`。
+
 ---
 
 ## 归档：视觉相似度 Markdown 报告（`results/visual_similarity/`）
@@ -155,6 +174,8 @@ python utils/five_dicts_predict.py --auto --input-dir data/images_origin
 | `utils/vs_codino_score.py` | 单对 DINOv2 相似度 |
 | `utils/filter.py` | 按主名从 SCUT_llm（snapshot/html/spec）拷贝至 `data/ours/…` |
 | `utils/five_dicts_predict.py` | 五分区 YOLO 检测与可视化，默认输出 `output/level1/` |
+| `utils/components_predict.py` | UI 组件 YOLO 检测与可视化，默认输出 `output/components/` |
+| `utils/register_auto_component_alias.py` | 加载旧权重时 `auto_component` → `ultralytics` 的 pickle 别名（供组件脚本等使用） |
 | `visual_similarity_calculation.py` | 两目录批量 CLIP，输出 Markdown |
 | `results/visual_similarity/` | 归档的各 baseline 批量 CLIP 报告（Markdown） |
 | `README.md` | 本说明 |
