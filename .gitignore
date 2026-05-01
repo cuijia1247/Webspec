@@ -1,6 +1,8 @@
 # 数据集与下载的预训练权重不纳入版本库
 /data/
 /pretrainedModels/
+# 脚本生成的检测结果与可视化（如五分区 YOLO）
+/output/
 
 # Python
 __pycache__/
