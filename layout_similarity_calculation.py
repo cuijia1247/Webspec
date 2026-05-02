@@ -3,16 +3,18 @@
 布局相似度计算（Layout Similarity）。
 
 流程：
-  1. 对 source/target 分别调用 five_dicts_predict 和 components_predict，
+  1. 对 source/target 分别调用 five_dicts_predict 和 region_predict，
      得到带 label 与 bounding-box 的检测结果。
   2. 基于 bounding-box 包含关系构建两层嵌套布局树：
-       page -> level_1 区域(header/body/footer/leftsider/rightsider) -> 组件
-  3. overall_ts：对完整树计算 Tree Edit Distance（TED）。
-  4. region_ts：只保留 level_1 区域节点（剥离组件子节点）后计算 TED。
+       page -> level_1 区域(header/body/footer/leftsider/rightsider)
+            -> level_2 comp_* 区域(comp_body/comp_footer/comp_header/comp_leftsider/comp_rightsider)
+  3. overall_ts：对完整树（含 comp_* 子节点）计算 Tree Edit Distance（TED）。
+  4. region_ts：只保留 level_1 区域节点（剥离 comp_* 子节点）后计算 TED。
   5. LS = overall_ts + region_ts。
 
 依赖（除 utils/ 内已有库外）：
-    pip install zss    # Zhang-Shasha Tree Edit Distance
+    pip install zss ultralytics opencv-python    # zss：树编辑距离；ultralytics 需较新版本（含 C3k2 等），
+                                                  # 勿仅用仓库内旧版 pretrainedModels/yolo 覆盖 pip 包，否则加载 level2 权重会报错。
 
 用法::
 
@@ -27,23 +29,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-# ── 路径初始化（与 utils/ 内脚本对齐）─────────────────────────────────────────
+# ── 路径初始化 ────────────────────────────────────────────────────────────────
+# 注意：不要将 ``pretrainedModels/yolo`` 下的旧版 vendored ultralytics 插到 sys.path 最前。
+# level2 权重 ``best.pt`` 的 pickle 依赖新版模块（如 ``C3k2``），旧 vendor 会导致
+# ``Can't get attribute 'C3k2' …``。本脚本仅依赖 five_dicts / region_predict，应使用
+# 当前环境 ``pip install ultralytics`` 的版本。``utils/`` 仍加入 path 以便导入预测脚本。
 REPO_ROOT = Path(__file__).resolve().parent
 _UTILS_DIR = REPO_ROOT / "utils"
-_YOLO_VENDOR_ROOT = REPO_ROOT / "pretrainedModels" / "yolo"
 
-if _YOLO_VENDOR_ROOT.is_dir() and str(_YOLO_VENDOR_ROOT) not in sys.path:
-    sys.path.insert(0, str(_YOLO_VENDOR_ROOT))
 if str(_UTILS_DIR) not in sys.path:
     sys.path.insert(0, str(_UTILS_DIR))
 
-from register_auto_component_alias import ensure_auto_component_alias  # noqa: E402
-ensure_auto_component_alias()
-
 from five_dicts_predict import FiveDictsPredictConfig, predict_five_dicts  # noqa: E402
-from components_predict import ComponentsPredictConfig, predict_components  # noqa: E402
+from region_predict import RegionPredictConfig, predict_region  # noqa: E402
 
 # ── Tree Edit Distance（zss：Zhang-Shasha）────────────────────────────────────
 try:
@@ -116,17 +114,19 @@ def extract_layout(
     image_path: str | Path,
     *,
     five_dicts_config: FiveDictsPredictConfig | None = None,
-    components_config: ComponentsPredictConfig | None = None,
+    region_config: RegionPredictConfig | None = None,
 ) -> tuple[list[DetBox], list[DetBox]]:
     """
     对单张图片运行两个检测模型。
 
     Returns:
-        (five_dicts_boxes, components_boxes) — DetBox 列表，各含 label 与 xyxy。
+        (five_dicts_boxes, region_boxes) — DetBox 列表，各含 label 与 xyxy。
+          - five_dicts_boxes: level_1 五分区（header/body/footer/leftsider/rightsider）
+          - region_boxes:     level_2 comp_* 五类区域（用于 overall_ts 子节点）
     """
     fd_out = predict_five_dicts(image_path, five_dicts_config, return_vis=False)
-    comp_out = predict_components(image_path, components_config, return_vis=False)
-    return _result_to_detboxes(fd_out), _result_to_detboxes(comp_out)
+    reg_out = predict_region(image_path, region_config, return_vis=False)
+    return _result_to_detboxes(fd_out), _result_to_detboxes(reg_out)
 
 
 # ── 包含关系分配 ──────────────────────────────────────────────────────────────
@@ -169,12 +169,12 @@ def _assign_to_regions(
 
 def build_layout_tree(
     five_dicts_boxes: list[DetBox],
-    components_boxes: list[DetBox],
+    region_boxes: list[DetBox],
 ) -> LayoutNode:
     """
     构建两层嵌套布局树：
-      page -> level_1 区域（按 y1 升序） -> 组件（按 y1 升序）
-    未被任何区域包含（重叠率 < 0.5）的组件直接挂在 page 下。
+      page -> level_1 区域（按 y1 升序） -> level_2 comp_* 区域（按 y1 升序）
+    未被任何 level_1 区域包含（重叠率 < 0.5）的 comp_* 框直接挂在 page 下。
     """
     root = LayoutNode(label="page")
 
@@ -183,18 +183,18 @@ def build_layout_tree(
     sorted_regions = [five_dicts_boxes[i] for i in sorted_ri]
     region_nodes = [LayoutNode(label=r.label, box=r) for r in sorted_regions]
 
-    assignment = _assign_to_regions(sorted_regions, components_boxes)
+    assignment = _assign_to_regions(sorted_regions, region_boxes)
 
     for ri, rnode in enumerate(region_nodes):
-        for ci in sorted(assignment.get(ri, []), key=lambda i: components_boxes[i].y1):
-            comp = components_boxes[ci]
-            rnode.add_child(LayoutNode(label=comp.label, box=comp))
+        for ci in sorted(assignment.get(ri, []), key=lambda i: region_boxes[i].y1):
+            reg = region_boxes[ci]
+            rnode.add_child(LayoutNode(label=reg.label, box=reg))
         root.add_child(rnode)
 
-    # 未归属组件直接挂 root
-    for ci in sorted(assignment.get(-1, []), key=lambda i: components_boxes[i].y1):
-        comp = components_boxes[ci]
-        root.add_child(LayoutNode(label=comp.label, box=comp))
+    # 未归属的 comp_* 框直接挂 root
+    for ci in sorted(assignment.get(-1, []), key=lambda i: region_boxes[i].y1):
+        reg = region_boxes[ci]
+        root.add_child(LayoutNode(label=reg.label, box=reg))
 
     return root
 
@@ -235,7 +235,7 @@ def compute_layout_similarity(
     target_path: str | Path,
     *,
     five_dicts_config: FiveDictsPredictConfig | None = None,
-    components_config: ComponentsPredictConfig | None = None,
+    region_config: RegionPredictConfig | None = None,
     verbose: bool = True,
 ) -> dict[str, Any]:
     """
@@ -243,25 +243,25 @@ def compute_layout_similarity(
 
     Returns:
         dict 包含:
-          - source_tree / target_tree:          完整布局树（LayoutNode）
+          - source_tree / target_tree:          完整布局树（level_1 + comp_* 子节点）
           - source_region_tree / target_region_tree: 仅 level_1 的区域树
-          - overall_ts:  完整树 TED
+          - overall_ts:  完整树 TED（含 comp_* 层）
           - region_ts:   仅 level_1 区域树 TED
           - LS:          overall_ts + region_ts
     """
-    # Step 1: 提取检测框
-    src_fd, src_comp = extract_layout(
+    # Step 1: 提取检测框（five_dicts + region comp_*）
+    src_fd, src_reg = extract_layout(
         source_path, five_dicts_config=five_dicts_config,
-        components_config=components_config,
+        region_config=region_config,
     )
-    tgt_fd, tgt_comp = extract_layout(
+    tgt_fd, tgt_reg = extract_layout(
         target_path, five_dicts_config=five_dicts_config,
-        components_config=components_config,
+        region_config=region_config,
     )
 
-    # Step 2: 构建布局树
-    src_tree = build_layout_tree(src_fd, src_comp)
-    tgt_tree = build_layout_tree(tgt_fd, tgt_comp)
+    # Step 2: 构建布局树（level_1 -> comp_*）
+    src_tree = build_layout_tree(src_fd, src_reg)
+    tgt_tree = build_layout_tree(tgt_fd, tgt_reg)
 
     if verbose:
         print(f"[SOURCE] {src_tree.to_string()}")
@@ -348,7 +348,7 @@ def batch_compute_ls(
     target_dir: str | Path,
     *,
     five_dicts_config: FiveDictsPredictConfig | None = None,
-    components_config: ComponentsPredictConfig | None = None,
+    region_config: RegionPredictConfig | None = None,
     out_dir: Path | None = None,
 ) -> Path:
     """
@@ -393,7 +393,7 @@ def batch_compute_ls(
             result = compute_layout_similarity(
                 src_path, tgt_path,
                 five_dicts_config=five_dicts_config,
-                components_config=components_config,
+                region_config=region_config,
                 verbose=False,
             )
             ls_values.append(result["LS"])
@@ -450,14 +450,19 @@ def parse_args() -> argparse.Namespace:
                    help="target 图片路径（单图模式）")
     p.add_argument("--conf-fd", type=float, default=None,
                    help="five_dicts 置信度阈值（覆盖默认 0.25）")
-    p.add_argument("--conf-comp", type=float, default=None,
-                   help="components 置信度阈值（覆盖默认 0.25）")
+    p.add_argument("--conf-region", type=float, default=None,
+                   help="region comp_* 置信度阈值（覆盖默认 0.1）")
     batch = p.add_argument_group("文件夹批量模式")
     batch.add_argument("--dir", action="store_true",
                        help="启用文件夹批量模式，需配合 --source-dir / --target-dir")
     # batch.add_argument("--source-dir", default="data/ours/snapshot", #ours
     # batch.add_argument("--source-dir", default="data/gemini3-1/snapshot", #gemini3-1
-    batch.add_argument("--source-dir", default="data/GLM/snapshot", #glm
+    # batch.add_argument("--source-dir", default="data/GLM/snapshot", #glm
+    # batch.add_argument("--source-dir", default="data/gpt4o/snapshot", #gpt4o
+    # batch.add_argument("--source-dir", default="data/gpt4omini/snapshot", #gpt4omini
+    # batch.add_argument("--source-dir", default="data/LLaVA/snapshot", #LLaVA
+    # batch.add_argument("--source-dir", default="data/internVL/snapshot", #internVL
+    batch.add_argument("--source-dir", default="data/QwenVL/snapshot", #QwenVL
                        help="source 图片文件夹（与 --dir 联用）")
     batch.add_argument("--target-dir", default="data/images_origin",
                        help="target 图片文件夹（与 --dir 联用）")
@@ -471,22 +476,22 @@ def main() -> None:
     if args.conf_fd is not None:
         fd_cfg.confidence_threshold = args.conf_fd
 
-    comp_cfg = ComponentsPredictConfig()
-    if args.conf_comp is not None:
-        comp_cfg.confidence_threshold = args.conf_comp
+    region_cfg = RegionPredictConfig()
+    if args.conf_region is not None:
+        region_cfg.confidence_threshold = args.conf_region
 
     if args.dir:
         batch_compute_ls(
             args.source_dir, args.target_dir,
             five_dicts_config=fd_cfg,
-            components_config=comp_cfg,
+            region_config=region_cfg,
         )
         return
 
     result = compute_layout_similarity(
         args.source, args.target,
         five_dicts_config=fd_cfg,
-        components_config=comp_cfg,
+        region_config=region_cfg,
         verbose=True,
     )
     out_path = save_result(result, args.source)
