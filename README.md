@@ -1,41 +1,65 @@
 # Web UI 视觉相似度工具（WebSpec）
 
-本仓库用于对 **Web UI 截图/设计稿** 等图像做 **视觉相似度** 计算与简单数据整理：双图 CLIP / DINOv2 打分、按目录批量 CLIP 报表、从 SCUT 目录按主文件名过滤拷贝。
+本仓库用于对 **Web UI 截图/设计稿** 进行 **视觉相似度** 与 **布局结构相似度** 计算，以及从 SCUT 目录按主文件名过滤拷贝等数据整理工作。
 
-**运行前请在项目根目录 `Webspec/` 下打开终端**（保证相对路径 `./pretrainedModels`、`./data` 与脚本一致）。
+**运行前请在项目根目录 `Webspec/` 下打开终端**（所有相对路径 `./pretrainedModels`、`./data`、`./output` 均基于此）。
+
+---
+
+## 目录
+
+1. [环境与依赖](#环境与依赖)
+2. [预训练权重目录](#预训练权重目录)
+3. [脚本运行说明](#脚本运行说明)
+   - [1. 单对图像 — CLIP](#1-单对图像--clip-utilsvs_clip_scorepy)
+   - [2. 单对图像 — DINOv2](#2-单对图像--dinov2-utilsvs_codino_scorepy)
+   - [3. 批量 CLIP 报表](#3-批量-clip-报表-visual_similarity_calculationpy)
+   - [4. SCUT 产出过滤拷贝](#4-scut-产出过滤拷贝-utilsfilterpy)
+   - [5. 五分区布局检测](#5-五分区布局检测-utilsfive_dicts_predictpy)
+   - [6. UI 组件框检测](#6-ui-组件框检测-utilscomponents_predictpy)
+   - [7. Level-2 组件分区检测](#7-level-2-组件分区检测-utilsregion_predictpy)
+   - [8. 布局相似度 LS](#8-布局相似度-ls-layout_similarity_calculationpy)
+   - [9. 布局类别说明](#9-布局类别说明-utilsui_layout_instructionyaml)
+4. [方法简介](#方法简介)
+5. [仓库结构](#仓库结构)
 
 ---
 
 ## 环境与依赖
 
 ```bash
+# 基础（CLIP / DINOv2 视觉相似度）
 pip install torch torchvision pillow
 pip install transformers huggingface_hub
-```
 
-YOLO 五分区 / 组件 / Level-2 / 布局相似度等还需：
-
-```bash
+# YOLO 检测与布局相似度
 pip install ultralytics opencv-python pyyaml
-pip install zss   # 布局树编辑距离（layout_similarity_calculation.py）
+pip install zss          # 布局树编辑距离（layout_similarity_calculation.py）
 ```
 
-**Ultralytics 版本**：`pretrainedModels/level2/best.pt` 等较新权重在反序列化时可能依赖新版模块（如 `C3k2`）。请使用 **当前环境内 pip 安装的** `ultralytics`，并建议保持较新版本（`pip install -U ultralytics`）。**不要**在运行 `layout_similarity_calculation.py` 时让仓库内旧的 `pretrainedModels/yolo` 覆盖 pip 包（该脚本已不再强制插入该路径）；`utils/components_predict.py` 仍会优先使用 vendored yolo 以兼容旧权重与 `auto_component` pickle。
+> **Ultralytics 版本注意**：`pretrainedModels/level2/best.pt` 等较新权重依赖新版架构（如 `C3k2`）。
+> 请使用 pip 安装的 `ultralytics`，并保持较新版本：`pip install -U ultralytics`。
+> `layout_similarity_calculation.py` **不再**将 `pretrainedModels/yolo` 插入 `sys.path`，
+> 以避免旧 vendored 版本遮蔽 pip 包；`utils/components_predict.py` 仍优先使用 vendored
+> yolo 以兼容旧权重与 `auto_component` pickle。
 
-有 NVIDIA GPU 时可安装带 CUDA 的 PyTorch；脚本会自动优先使用 `cuda`。
+有 NVIDIA GPU 时安装对应 CUDA 版 PyTorch；脚本自动使用 `cuda`。
 
 ---
 
 ## 预训练权重目录
 
-默认使用项目下的 **`./pretrainedModels/`**（相对于当前工作目录）：
+所有权重默认存放在 **`./pretrainedModels/`** 下（`.gitignore` 已忽略）：
 
-| 用途 | 说明 |
+| 路径 | 用途 |
 |------|------|
-| CLIP | Hugging Face `snapshot_download` 到 `pretrainedModels/<模型子目录>/` |
-| DINOv2 | `torch.hub` 缓存，一般在 `pretrainedModels/hub/` 等子路径 |
+| `pretrainedModels/<模型子目录>/` | CLIP（Hugging Face `snapshot_download`） |
+| `pretrainedModels/hub/` | DINOv2（`torch.hub` 缓存） |
+| `pretrainedModels/level1/best.ptt` | Level-1 五分区 YOLO 权重 |
+| `pretrainedModels/level2/best.pt` | Level-2 `comp_*` 五类分区 YOLO 权重 |
+| `pretrainedModels/yolo/models/best.pt` | UI 组件 YOLO 权重（vendored ultralytics） |
 
-首次运行需联网下载；国内可配合 CLIP 的 `--hf_endpoint`、`--proxy`，以及 DINOv2 的 `--proxy`。仓库的 `.gitignore` 已忽略 `pretrainedModels/`、`data/` 与 **`output/`**（脚本产物目录，如 `output/level1/` 五分区、`output/level2/` Level-2、`output/components/` 组件检测、`output/layout_similarity/` 布局相似度汇总等），不纳入 Git。
+首次运行需联网下载；国内可用 `--hf_endpoint https://hf-mirror.com`（CLIP）或 `--proxy http://127.0.0.1:7890`。
 
 ---
 
@@ -43,35 +67,55 @@ pip install zss   # 布局树编辑距离（layout_similarity_calculation.py）
 
 ### 1. 单对图像 — CLIP（`utils/vs_clip_score.py`）
 
+计算两张截图的 **CLIP 余弦相似度**（L2 归一化后）。
+
 ```bash
-python utils/vs_clip_score.py --img1 path/to/a.png --img2 path/to/b.png
+python utils/vs_clip_score.py --img1 path/a.png --img2 path/b.png
 ```
 
-常用参数：`--model`（默认 `openai/clip-vit-base-patch16`）、`--cache_dir`、`--proxy`、`--hf_endpoint`（默认 `https://hf-mirror.com`）、`--device`。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--img1` / `--img2` | — | 两张图片路径（必须） |
+| `--model` | `openai/clip-vit-base-patch16` | 也支持 `clip-vit-base-patch32`、`clip-vit-large-patch14` |
+| `--cache_dir` | `./pretrainedModels` | 模型权重缓存目录 |
+| `--hf_endpoint` | `https://hf-mirror.com` | HuggingFace 镜像地址 |
+| `--proxy` | — | HTTP 代理，如 `http://127.0.0.1:7890` |
+| `--device` | 自动 | `cuda` / `cpu` |
 
 ```bash
+# 示例：指定代理
 python utils/vs_clip_score.py --img1 a.png --img2 b.png --proxy http://127.0.0.1:7890
 ```
 
+---
+
 ### 2. 单对图像 — DINOv2（`utils/vs_codino_score.py`）
 
-```bash
-python utils/vs_codino_score.py --img1 path/to/a.png --img2 path/to/b.png
-```
-
-常用参数：`--model`（默认 `dinov2_vitb14`）、`--cache_dir`、`--proxy`、`--image_size`（默认 224）、`--device`。
-
-### 3. 批量 CLIP 报表（`visual_similarity_calculation.py`，项目根目录）
-
-对两个文件夹中 **主文件名相同（`Path.stem`，不要求扩展名一致）** 的图片逐对计算 CLIP 余弦相似度，写入 Markdown（表列为「主文件名 + 相似度」，文末含统计摘要）。
-
-脚本会通过查找 `utils/vs_clip_score.py` **自动定位仓库根目录**，相对路径 `./data`、`--output` 等均相对于该根目录解析。
+计算两张截图的 **DINOv2 余弦相似度**，对纹理与细粒度外观更敏感。
 
 ```bash
-python visual_similarity_calculation.py --help
+python utils/vs_codino_score.py --img1 path/a.png --img2 path/b.png
 ```
 
-典型用法（请按本机实际目录修改）：
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--img1` / `--img2` | — | 两张图片路径（必须） |
+| `--model` | `dinov2_vitb14` | 也支持 `dinov2_vits14`（快）、`dinov2_vitl14`（强） |
+| `--cache_dir` | `./pretrainedModels` | Torch Hub 缓存目录 |
+| `--proxy` | — | HTTP 代理 |
+| `--image_size` | `224` | 输入分辨率 |
+| `--device` | 自动 | `cuda` / `cpu` |
+
+```bash
+# 示例：使用轻量模型
+python utils/vs_codino_score.py --img1 a.png --img2 b.png --model dinov2_vits14
+```
+
+---
+
+### 3. 批量 CLIP 报表（`visual_similarity_calculation.py`）
+
+遍历两个目录，对 **主文件名相同（忽略后缀）** 的图片对批量计算 CLIP 相似度，输出 Markdown 报告（含每对分数与统计摘要）。
 
 ```bash
 python visual_similarity_calculation.py \
@@ -80,121 +124,177 @@ python visual_similarity_calculation.py \
   --output results.md
 ```
 
-- `--dir1` / `--dir_a`：文件夹 1；`--dir2` / `--dir_b`：文件夹 2（默认：`data/images_origin/`）。  
-- `--output`：报告 Markdown 路径，默认项目根目录 **`results.md`**。  
-- 其余与 CLIP 一致：`--model`、`--cache_dir`、`--proxy`、`--hf_endpoint`、`--device`。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--dir1` / `--dir_a` | `data/ours/snapshot` | 第一个图片目录 |
+| `--dir2` / `--dir_b` | `data/images_origin` | 第二个图片目录 |
+| `--output` | `results.md` | 报告输出路径（根目录相对） |
+| `--model`、`--cache_dir`、`--proxy`、`--hf_endpoint`、`--device` | — | 与 CLIP 脚本一致 |
 
-若某一主文件名在单侧目录中出现多个图片文件，会按全名字典序择优保留其一并打印警告（与下方 `filter.py` 行为一致）。
+> 某主名在单侧目录有多文件时按字典序择优保留其一并打印警告。
+> 根目录下生成的 `results.md` / `*_results.md` 已被 `.gitignore` 忽略；
+> 需长期保留请复制至 `results/visual_similarity/`。
 
-> 脚本内 `--dir1` / `--dir2` 的默认值以 `python visual_similarity_calculation.py --help` 为准（代码中可对不同 baseline snapshot 留有注释占位）；若与你目录不一致，请始终显式传入 `--dir1` / `--dir2`。
+---
 
 ### 4. SCUT 产出过滤拷贝（`utils/filter.py`）
 
-以 `data/images_origin/` 下文件 **主名（无后缀）** 为基准，从 `data/ours/SCUT_llm/` 下三路匹配并复制到 `data/ours/` 对应位置：
-
-| 类型 | SCUT 源（默认） | 输出（默认） |
-|------|-----------------|--------------|
-| 图片 | `data/ours/SCUT_llm/snapshot/` | `data/ours/snapshot/` |
-| HTML | `data/ours/SCUT_llm/html/` | `data/ours/html/` |
-| Spec | `data/ours/SCUT_llm/spec/` | `data/ours/spec/` |
-
-输出文件名为「origin 主名 + SCUT 源文件后缀」，保证内容与后缀一致。
+以 `data/images_origin/` 的主名为基准，从 `SCUT_llm` 产出中匹配并复制图片、HTML、Spec 到对应目录，输出文件名保持「origin 主名 + SCUT 后缀」。
 
 ```bash
-python utils/filter.py
-python utils/filter.py --dry-run
-python utils/filter.py --skip-html
-python utils/filter.py --skip-spec
+python utils/filter.py                   # 处理全部（图片 + HTML + Spec）
+python utils/filter.py --dry-run         # 仅预览，不实际拷贝
+python utils/filter.py --skip-html       # 跳过 HTML
+python utils/filter.py --skip-spec       # 跳过 Spec
 ```
 
-可用 `--origin`、`--source`、`--dest`、`--html-source`、`--html-dest`、`--spec-source`、`--spec-dest` 覆盖默认路径（见 `python utils/filter.py --help`）。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `--origin` | `data/images_origin` | 主名来源目录 |
+| `--source` / `--image-source` | `data/ours/SCUT_llm/snapshot` | 图片源目录 |
+| `--dest` / `--image-dest` | `data/ours/snapshot` | 图片输出目录 |
+| `--html-source` | `data/ours/SCUT_llm/html` | HTML 源目录 |
+| `--html-dest` | `data/ours/html` | HTML 输出目录 |
+| `--spec-source` | `data/ours/SCUT_llm/spec` | Spec 源目录 |
+| `--spec-dest` | `data/ours/spec` | Spec 输出目录 |
+| `--dry-run` | — | 仅打印操作，不实际复制 |
 
-### 5. 五分区布局检测（`utils/five_dicts_predict.py`，Ultralytics YOLO）
+---
 
-对网页截图做 **header / footer / body / leftsider / rightsider** 检测，并将框画回图像。默认权重路径为仓库内 `pretrainedModels/level1/best.ptt`（若仅存 `.pt` 会自动尝试）；默认将可视化写入 **`output/level1/`**（该目录已被 `.gitignore` 忽略，勿提交大体积出图）。
+### 5. 五分区布局检测（`utils/five_dicts_predict.py`）
 
-建议在 conda 等已安装 `ultralytics`、`opencv-python` 的环境中运行（见脚本内说明）。
-
-单张：
+对截图做 **header / footer / body / leftsider / rightsider** 五类 YOLO 检测，并将框画回图像。
+权重：`pretrainedModels/level1/best.ptt`；输出：`output/level1/`。
 
 ```bash
+# 单张（默认保存带框可视化图）
 python utils/five_dicts_predict.py -i path/to/screenshot.png
-```
 
-批量（遍历目录内 `png`/`jpg`/`jpeg`/`webp`/`bmp`，仅第一层；加 `--recursive` 则递归子目录）：
-
-```bash
+# 批量（遍历目录，仅第一层；--recursive 递归子目录）
 python utils/five_dicts_predict.py --auto --input-dir data/images_origin
-```
 
-**可视化与 YOLO 标签 txt**：`--img` / `--no-img` 控制是否保存带框图片（**默认保存图**）；`--txt` 在与图片相同的输出目录下写入与源图 **stem 同名** 的 `.txt`（每行 `class x_center y_center width height`，相对宽高归一化）。批量时 `--img` 与 `--txt` 至少选其一。
-
-```bash
-# 默认：只出图（与原先一致）
-python utils/five_dicts_predict.py -i shot.png
-# 图 + 标签
+# 同时保存 YOLO 标签 txt（class xc yc w h，归一化）
 python utils/five_dicts_predict.py -i shot.png --txt
-# 只要 txt，不要图
+
+# 只要 txt，不保存图片
 python utils/five_dicts_predict.py -i shot.png --no-img --txt
 ```
 
-常用参数：`--model`、`--conf`、`--output`、`--show`（单张模式）。详细见 `python utils/five_dicts_predict.py --help`。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-i` / `--image` | 示例图 | 单张截图路径 |
+| `-o` / `--output` | `output/level1/<stem>_five_dicts_vis<ext>` | 输出路径 |
+| `--model` | `pretrainedModels/level1/best.ptt` | 覆盖权重路径 |
+| `--conf` | `0.25` | 置信度阈值 |
+| `--img` / `--no-img` | 开启 | 是否保存可视化图片 |
+| `--txt` | 关闭 | 是否保存 YOLO 标签 txt |
+| `--show` | — | 单张模式弹窗显示 |
+| `--auto` | — | 批量模式开关 |
+| `--input-dir` | `data/images_origin/` | 批量模式图片目录 |
+| `--recursive` | — | 递归子目录 |
 
-### 6. UI 组件框检测（`utils/components_predict.py`，Ultralytics YOLO）
+---
 
-对网页截图做 **UI 控件/组件** 多类检测（类别与训练数据 YAML 一致，默认参考 `pretrainedModels/yolo/models/ui_tag_data.yaml`）。权重默认 `pretrainedModels/yolo/models/best.pt`。可视化写入 **`output/components/`**（同级于五分区结果的 `output/level1/`，均在 `.gitignore` 的 `output/` 下）。
+### 6. UI 组件框检测（`utils/components_predict.py`）
 
-加载旧版 `best.pt` 时若 pickle 中模块名为 `auto_component.*`，脚本会通过 **`utils/register_auto_component_alias.py`** 在导入后映射到 `ultralytics`，避免 `ModuleNotFoundError`（该文件已纳入 Git；`pretrainedModels/` 整体仍默认不入库）。
+对截图做 **49 类 UI 控件/组件** 细粒度检测（类别见 `pretrainedModels/yolo/models/ui_tag_data.yaml`）。
+权重：`pretrainedModels/yolo/models/best.pt`；输出：`output/components/`。
 
-**标签绘制**：优先使用系统中的 Noto CJK / 文泉驿等本地字体；若无中文字体，则退化为「类 id + 置信度」，避免 Ultralytics 默认逻辑联网下载字体导致卡住。
-
-建议在已安装 `ultralytics`、`opencv-python`、`pyyaml` 的 conda 环境中运行；需要中文标签时可安装系统字体包（如 `fonts-noto-cjk`）。
-
-单张与批量：
+标签绘制优先使用系统本地 Noto CJK / 文泉驿字体；无中文字体时退化为「类id 置信度」。
 
 ```bash
+# 单张
 python utils/components_predict.py -i path/to/screenshot.png
+
+# 批量
 python utils/components_predict.py --auto --input-dir data/images_origin
-```
 
-**`--img` / `--no-img`、 `--txt`** 与五分区脚本含义相同（默认保存图；`--txt` 写出 YOLO 格式 `stem.txt`）。
-
-```bash
+# 同时保存 YOLO txt
 python utils/components_predict.py -i shot.png --txt
+
+# 仅 txt，不保存图
 python utils/components_predict.py --auto --input-dir data/images_origin --txt --no-img
 ```
 
-详细参数见 `python utils/components_predict.py --help`。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-i` / `--image` | 示例图 | 单张截图路径 |
+| `-o` / `--output` | `output/components/<stem>_components_vis<ext>` | 输出路径 |
+| `--model` | `pretrainedModels/yolo/models/best.pt` | 覆盖权重路径 |
+| `--data-yaml` | `pretrainedModels/yolo/models/ui_tag_data.yaml` | 参考 names yaml |
+| `--conf` | `0.25` | 置信度阈值 |
+| `--img` / `--no-img` | 开启 | 是否保存可视化图片 |
+| `--txt` | 关闭 | 是否保存 YOLO 标签 txt |
+| `--show` | — | 单张弹窗显示 |
+| `--auto` | — | 批量模式 |
+| `--input-dir` | `data/images_origin/` | 批量图片目录 |
+| `--recursive` | — | 递归子目录 |
 
-### 7. Level-2 组件五分区检测（`utils/region_predict.py`，Ultralytics YOLO）
+---
 
-对网页截图做与 level1 语义对应的 **细粒度五类** 检测，标签为 `comp_body` / `comp_footer` / `comp_header` / `comp_leftsider` / `comp_rightsider`（约定 **class_id 0–4** 与训练 `data.yaml` 中 `names` 一致；详见脚本模块文档与 `utils/ui_layout_instruction.yaml` 中的 level-1 / component 说明可对齐业务）。
+### 7. Level-2 组件分区检测（`utils/region_predict.py`）
 
-默认权重 **`pretrainedModels/level2/best.pt`**，可视化写入 **`output/level2/`**，文件名为 `*_region_vis.<扩展名>`；`--txt` 写出同名 YOLO 标签。
+对截图做 **5 类 `comp_*`** 细粒度分区检测，与 level-1 五分区在语义上对应。
+权重：`pretrainedModels/level2/best.pt`；输出：`output/level2/`。
+
+**class_id → 标签映射（以训练 data.yaml 中 `names` 的 0–4 顺序为准）**：
+
+| class_id | label | 说明 |
+|----------|-------|------|
+| 0 | `comp_body` | 主体/主内容区 |
+| 1 | `comp_footer` | 页脚区 |
+| 2 | `comp_header` | 页头区 |
+| 3 | `comp_leftsider` | 左侧栏 |
+| 4 | `comp_rightsider` | 右侧栏 |
 
 ```bash
+# 单张
 python utils/region_predict.py -i path/to/screenshot.png
+
+# 批量
 python utils/region_predict.py --auto --input-dir data/images_origin
+
+# 调低置信度（默认 0.1）
+python utils/region_predict.py -i shot.png --conf 0.05
+
+# 仅保存 YOLO txt，不保存图
+python utils/region_predict.py -i shot.png --no-img --txt
 ```
 
-常用参数与五分区脚本类似：`--model`、`--conf`、`--img` / `--no-img`、`--txt`、`--show`（单张）。`python utils/region_predict.py --help`。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-i` / `--image` | 示例图 | 单张截图路径 |
+| `-o` / `--output` | `output/level2/<stem>_region_vis<ext>` | 输出路径 |
+| `--model` | `pretrainedModels/level2/best.pt` | 覆盖权重路径 |
+| `--conf` | `0.1` | 置信度阈值 |
+| `--img` / `--no-img` | 开启 | 是否保存可视化图片 |
+| `--txt` | 关闭 | 是否保存 YOLO 标签 txt |
+| `--show` | — | 单张弹窗显示 |
+| `--auto` | — | 批量模式 |
+| `--input-dir` | `data/images_origin/` | 批量图片目录 |
+| `--recursive` | — | 递归子目录 |
 
-### 8. 布局相似度 LS（`layout_similarity_calculation.py`，项目根目录）
+---
 
-结合 **五分区**（`five_dicts_predict`）与 **Level-2 五类区域**（`region_predict`，`comp_body` / `comp_footer` / `comp_header` / `comp_leftsider` / `comp_rightsider`），将两图各自的检测框归并为 **嵌套布局树**（`page` → level1 区域 → `comp_*` 子节点），再计算：
+### 8. 布局相似度 LS（`layout_similarity_calculation.py`）
 
-- **overall_ts**：完整树（含 `comp_*` 层）的 Tree Edit Distance（TED，`zss`）。
-- **region_ts**：仅保留 level1 五区域节点（剥离子节点）后的 TED。
-- **LS** = overall_ts + region_ts（**数值越小越接近**，非 0–1 相似度）。
+结合 **五分区**（`five_dicts_predict`）与 **Level-2 comp_* 五类**（`region_predict`），将检测框归并为两层嵌套布局树（`page → level1 区域 → comp_* 子节点`），计算：
 
-单对图片：结果写入 **`output/layout_similarity/<source 主文件名>.txt`**（含两棵 overall 树、两棵 region 树及三个分数）。常用参数：`--conf-fd`（五分区置信度）、`--conf-region`（Level-2 置信度）。
+- **overall_ts**：完整树（含 `comp_*` 层）的 Tree Edit Distance（TED，`zss` Zhang-Shasha）。
+- **region_ts**：仅保留 level1 五区域节点（剥离 `comp_*` 子节点）后的 TED。
+- **LS = overall_ts + region_ts**（数值越小结构越相似，非 0–1 相似度）。
+
+结果文件格式：两棵 overall 树字符串、两棵 region 树字符串，以及 overall_ts / region_ts / LS 数值。
+
+#### 单对图片
 
 ```bash
-pip install zss ultralytics opencv-python
 python layout_similarity_calculation.py -s path/source.png -t path/target.jpg
 ```
 
-**文件夹批量**：`--dir` 与 **`--source-dir` / `--target-dir`** 联用，按 **主文件名相同（忽略后缀）** 配对；汇总写入 **`output/layout_similarity/<source 文件夹名>.txt`**，文末含 **avg_LS**。
+结果写入 **`output/layout_similarity/<source 主文件名>.txt`**。
+
+#### 文件夹批量
 
 ```bash
 python layout_similarity_calculation.py --dir \
@@ -202,52 +302,62 @@ python layout_similarity_calculation.py --dir \
   --target-dir data/images_origin
 ```
 
-### 9. 布局类别说明（`utils/ui_layout_instruction.yaml`）
+匹配规则：两目录下 **主文件名相同（忽略后缀）** 的图片配对。
+结果汇总写入 **`output/layout_similarity/<source 目录名>.txt`**，文件头部含 **avg_LS**。
 
-集中说明 **level_1**（五分区）与 **component**（`ui_tag_data.yaml` 中 49 类 slug）的 id / label，供指令生成、标签解析与各预测脚本对齐引用。
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-s` / `--source` | 示例图 | source 截图路径（单图模式） |
+| `-t` / `--target` | 示例图 | target 截图路径（单图模式） |
+| `--conf-fd` | `0.25` | five_dicts 置信度阈值 |
+| `--conf-region` | `0.1` | region comp_* 置信度阈值 |
+| `--dir` | — | 启用文件夹批量模式 |
+| `--source-dir` | `data/ours/snapshot` | source 图片目录（批量模式） |
+| `--target-dir` | `data/images_origin` | target 图片目录（批量模式） |
 
 ---
 
-## 归档：视觉相似度 Markdown 报告（`results/visual_similarity/`）
+### 9. 布局类别说明（`utils/ui_layout_instruction.yaml`）
 
-将各模型 / 实验的 **批量 CLIP 报表** 汇总在 `results/visual_similarity/` 下，便于对比与引用（数据仍依赖本地 `data/`，仅报告入仓）。当前包含例如：
-
-| 文件 | 说明（概览） |
-|------|----------------|
-| `ours_before_results.md` / `ours_after_results.md` | 本方法前后或其他对照 |
-| `gimini_results.md`、`glm_results.md`、`internVL_results.md`、`qwenvl_results.md` 等 | 各基线模型 snapshot 相对 `data/images_origin` 的相似度表 |
-| `gpt4o_results.md`、`gpt4omini_results.md`、`LLaVA_results.md` | 其他 API / 模型结果 |
-
-根目录下由脚本 **新生成** 的 `results.md`、以及 `*_results.md` 仍由 `.gitignore` 忽略，避免覆盖本地实验输出；需要长期保留时请复制到 `results/visual_similarity/` 或改名后再提交。
+集中说明 **level_1**（五分区 class_id 0–4）与 **component**（`ui_tag_data.yaml` 中 49 类 slug / 中文名 / id）的对应关系，供指令生成、标签解析与各预测脚本对齐引用。
 
 ---
 
 ## 方法简介
 
-| 方式 | 脚本 | 默认骨干 | 特点（简要） |
-|------|------|-----------|----------------|
-| CLIP | `utils/vs_clip_score.py` | ViT-B/16 | 语义/内容与布局倾向更明显 |
+| 方式 | 脚本 | 骨干 | 特点 |
+|------|------|------|------|
+| CLIP | `utils/vs_clip_score.py` | ViT-B/16 | 语义/内容与整体布局感知较强 |
 | DINOv2 | `utils/vs_codino_score.py` | `dinov2_vitb14` | 纹理与细粒度外观更敏感 |
-| 布局树 TED | `layout_similarity_calculation.py` | five_dicts + region_predict + `zss` | 结构差异（overall 含 comp_* + region），LS 为距离之和 |
+| 布局树 TED | `layout_similarity_calculation.py` | five_dicts + region_predict + `zss` | 结构差异（overall 含 comp_* 层 + region 层），LS 越小越相似 |
 
-CLIP / DINOv2 均为 **L2 归一化后的余弦相似度**；分数区间与「高低」不宜跨模型直接对比绝对值，更适合同一指标内排序或自建阈值。布局 **LS** 为树编辑距离之和，**数值越小表示结构越接近**，与余弦相似度含义不同，请勿混比绝对值。
+CLIP / DINOv2 输出 **L2 归一化余弦相似度**（0–1，越大越相似）。布局 **LS** 为树编辑距离之和（越小越相似），两类指标不宜混比绝对值。
 
 ---
 
-## 仓库结构（与脚本相关）
+## 仓库结构
 
-| 路径 | 说明 |
-|------|------|
-| `utils/vs_clip_score.py` | 单对 CLIP 相似度 |
-| `utils/vs_codino_score.py` | 单对 DINOv2 相似度 |
-| `utils/filter.py` | 按主名从 SCUT_llm（snapshot/html/spec）拷贝至 `data/ours/…` |
-| `utils/five_dicts_predict.py` | 五分区 YOLO 检测与可视化，默认输出 `output/level1/` |
-| `utils/components_predict.py` | UI 组件 YOLO 检测与可视化，默认输出 `output/components/` |
-| `utils/region_predict.py` | Level-2 五类 `comp_*` YOLO 检测，默认输出 `output/level2/` |
-| `utils/yolo_label_export.py` | 检测框转 YOLO txt 行（供上述脚本 `--txt` 使用） |
-| `utils/register_auto_component_alias.py` | 加载旧权重时 `auto_component` → `ultralytics` 的 pickle 别名（供组件脚本等使用） |
-| `utils/ui_layout_instruction.yaml` | level_1 / component 类别与脚本对齐说明 |
-| `layout_similarity_calculation.py` | 基于 five_dicts + region_predict 的布局树 LS，默认写入 `output/layout_similarity/*.txt` |
-| `visual_similarity_calculation.py` | 两目录批量 CLIP，输出 Markdown |
-| `results/visual_similarity/` | 归档的各 baseline 批量 CLIP 报告（Markdown） |
-| `README.md` | 本说明 |
+```
+Webspec/
+├── layout_similarity_calculation.py   # 布局相似度 LS（overall_ts + region_ts）
+├── visual_similarity_calculation.py   # 批量 CLIP 相似度报表（Markdown 输出）
+├── utils/
+│   ├── vs_clip_score.py               # 单对 CLIP 相似度
+│   ├── vs_codino_score.py             # 单对 DINOv2 相似度
+│   ├── filter.py                      # SCUT_llm 产出按主名过滤拷贝
+│   ├── five_dicts_predict.py          # Level-1 五分区 YOLO 检测 → output/level1/
+│   ├── components_predict.py          # 49 类 UI 组件 YOLO 检测 → output/components/
+│   ├── region_predict.py              # Level-2 comp_* 五类分区 YOLO 检测 → output/level2/
+│   ├── yolo_label_export.py           # 检测框转 YOLO txt（--txt 选项依赖）
+│   ├── register_auto_component_alias.py  # 旧权重 auto_component pickle 别名修复
+│   └── ui_layout_instruction.yaml    # level_1 / component 类别 id-label 对照表
+├── pretrainedModels/                  # 权重目录（.gitignore 忽略）
+├── data/                              # 图片与 HTML 数据（.gitignore 忽略）
+├── output/                            # 脚本产物（.gitignore 忽略）
+│   ├── level1/                        # 五分区可视化
+│   ├── level2/                        # Level-2 comp_* 可视化
+│   ├── components/                    # UI 组件可视化
+│   └── layout_similarity/             # LS 计算结果 txt
+└── results/
+    └── visual_similarity/             # 归档的 CLIP 报表（已纳入 Git）
+```
