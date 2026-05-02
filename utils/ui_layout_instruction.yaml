@@ -1,0 +1,77 @@
+# UI 布局检测类别说明（供指令生成、标签解析与脚本对齐）
+#
+# 依据：
+#   - level_1.categories：utils/five_dicts_predict.py 中 FiveDictsPredictConfig.layout_labels 顺序
+#   - component.categories：pretrainedModels/yolo/models/ui_tag_data.yaml 中 names
+#
+# 注意：level-1 的 YOLO class_id 须与训练该权重时 data yaml 里 names 的键顺序一致。
+#       若部署的 best.pt 中 names 顺序与下表不同，以推理时模型输出的 names 为准，并相应调整此表或重训。
+
+meta:
+  level_1_config: utils/five_dicts_predict.py
+  component_config: pretrainedModels/yolo/models/ui_tag_data.yaml
+  component_script: utils/components_predict.py
+
+level_1:
+  description: Level-1 五分区（整页粗粒度区域）
+  num_classes: 5
+  categories:
+    - { id: 0, label: body }
+    - { id: 1, label: footer }
+    - { id: 2, label: header }
+    - { id: 3, label: leftsider }
+    - { id: 4, label: rightsider }
+
+component:
+  description: UI 组件/控件细粒度检测（与 ui_tag_data.yaml names 一致；label 为英文 slug，zh 为训练数据中文名）
+  num_classes: 49
+  categories:
+    - { id: 0, label: button, zh: 按钮 }
+    - { id: 1, label: floating_action_button, zh: 悬浮按钮 }
+    - { id: 2, label: icon, zh: 图标 }
+    - { id: 3, label: radio_block, zh: 单选块 }
+    - { id: 4, label: scrollbar, zh: 滚动条 }
+    - { id: 5, label: title_text, zh: 标题文本 }
+    - { id: 6, label: hyperlink, zh: 超链接 }
+    - { id: 7, label: top_navigation, zh: 顶部导航栏 }
+    - { id: 8, label: side_navigation, zh: 侧边导航 }
+    - { id: 9, label: dropdown_menu, zh: 下拉菜单 }
+    - { id: 10, label: pagination, zh: 分页 }
+    - { id: 11, label: breadcrumb, zh: 面包屑 }
+    - { id: 12, label: steps, zh: 步骤条 }
+    - { id: 13, label: tooltip, zh: 提示 }
+    - { id: 14, label: drawer, zh: 抽屉 }
+    - { id: 15, label: dialog, zh: 对话框 }
+    - { id: 16, label: progress_bar, zh: 进度条 }
+    - { id: 17, label: skeleton, zh: 骨架屏 }
+    - { id: 18, label: selector, zh: 选择器 }
+    - { id: 19, label: checkbox, zh: 多选框 }
+    - { id: 20, label: radio, zh: 单选框 }
+    - { id: 21, label: form, zh: 表单 }
+    - { id: 22, label: input, zh: 输入框 }
+    - { id: 23, label: rating, zh: 评分 }
+    - { id: 24, label: slider, zh: 滑动输入条 }
+    - { id: 25, label: switch, zh: 开关 }
+    - { id: 26, label: transfer, zh: 穿梭框 }
+    - { id: 27, label: upload, zh: 上传 }
+    - { id: 28, label: avatar, zh: 头像 }
+    - { id: 29, label: calendar, zh: 日历 }
+    - { id: 30, label: card, zh: 卡片 }
+    - { id: 31, label: carousel, zh: 走马灯 }
+    - { id: 32, label: collapse, zh: 折叠面板 }
+    - { id: 33, label: empty_state, zh: 空状态 }
+    - { id: 34, label: image, zh: 图片 }
+    - { id: 35, label: list, zh: 列表 }
+    - { id: 36, label: popover, zh: 气泡框 }
+    - { id: 37, label: qrcode, zh: 二维码 }
+    - { id: 38, label: statistic, zh: 统计数值 }
+    - { id: 39, label: table, zh: 表格 }
+    - { id: 40, label: comment, zh: 评论 }
+    - { id: 41, label: tabs, zh: 页签 }
+    - { id: 42, label: tag, zh: 标签 }
+    - { id: 43, label: timeline, zh: 时间轴 }
+    - { id: 44, label: tree, zh: 结构树 }
+    - { id: 45, label: thumbnail, zh: 迷你图片 }
+    - { id: 46, label: figure, zh: 图 }
+    - { id: 47, label: map, zh: Map地图 }
+    - { id: 48, label: counter, zh: 计数器 }

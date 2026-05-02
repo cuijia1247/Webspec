@@ -38,6 +38,7 @@ ensure_auto_component_alias()
 
 from ultralytics import YOLO  # noqa: E402
 from ultralytics.utils.plotting import colors as ultra_colors  # noqa: E402
+from yolo_label_export import write_yolo_labels_txt  # noqa: E402
 
 if TYPE_CHECKING:
     from ultralytics.engine.results import Results
@@ -378,9 +379,13 @@ def predict_components(
     *,
     repo_root: Path | None = None,
     model: YOLO | None = None,
+    return_vis: bool = True,
 ) -> dict[str, Any]:
     """
     单张截图组件检测并后处理；返回 ``image_bgr``、``vis_bgr``、框数组及 ``result_raw``。
+
+    Args:
+        return_vis: 为 False 时不绘制框图，``vis_bgr`` 为 ``None``。
     """
     cfg = config or ComponentsPredictConfig()
     root = repo_root or REPO_ROOT
@@ -445,7 +450,10 @@ def predict_components(
         keep = dedupe_one_per_class(xyxy, conf, cls)
         xyxy, conf, cls = xyxy[keep], conf[keep], cls[keep]
 
-    vis_bgr = draw_boxes_bgr(image_bgr, xyxy, cls, conf, names)
+    if return_vis:
+        vis_bgr = draw_boxes_bgr(image_bgr, xyxy, cls, conf, names)
+    else:
+        vis_bgr = None
 
     return {
         "image_bgr": image_bgr,
@@ -481,6 +489,8 @@ def auto_predict_components_folder(
     out_dir: Path | None = None,
     repo_root: Path | None = None,
     recursive: bool = False,
+    save_img: bool = True,
+    save_txt: bool = False,
 ) -> tuple[int, int]:
     """批量组件检测；结果写入 ``output/components``（或 ``out_dir``）。"""
     import cv2
@@ -510,19 +520,36 @@ def auto_predict_components_folder(
     n_fail = 0
     for img_path in paths:
         try:
+            suf = img_path.suffix or ".png"
             out = predict_components(
                 img_path,
                 cfg,
                 repo_root=root,
                 model=model,
+                return_vis=save_img,
             )
-            suf = img_path.suffix or ".png"
-            out_path = dest / f"{img_path.stem}_components_vis{suf}"
-            if not cv2.imwrite(str(out_path), out["vis_bgr"]):
-                raise RuntimeError(f"cv2.imwrite 失败: {out_path}")
+            if save_txt:
+                ih, iw = out["image_bgr"].shape[:2]
+                write_yolo_labels_txt(
+                    dest / f"{img_path.stem}.txt",
+                    out["class_ids"],
+                    out["boxes_xyxy"],
+                    iw,
+                    ih,
+                )
+            if save_img:
+                assert out["vis_bgr"] is not None
+                out_path = dest / f"{img_path.stem}_components_vis{suf}"
+                if not cv2.imwrite(str(out_path), out["vis_bgr"]):
+                    raise RuntimeError(f"cv2.imwrite 失败: {out_path}")
             n_ok += 1
+            parts: list[str] = []
+            if save_img:
+                parts.append(f"{img_path.stem}_components_vis{suf}")
+            if save_txt:
+                parts.append(f"{img_path.stem}.txt")
             print(
-                f"[OK] {img_path.name} -> {out_path.name} "
+                f"[OK] {img_path.name} -> {' + '.join(parts)} "
                 f"(det={out['boxes_xyxy'].shape[0]})"
             )
         except Exception as e:  # noqa: BLE001
@@ -564,6 +591,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="保存后用 OpenCV 弹窗显示（单张模式）",
     )
+    p.add_argument(
+        "--img",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="保存带框可视化图片（默认开启；仅要 txt 时可加 --no-img）",
+    )
+    p.add_argument(
+        "--txt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="保存 YOLO 格式标签 txt（与源图 stem 同名）",
+    )
     batch = p.add_argument_group("批量")
     batch.add_argument(
         "--auto",
@@ -594,6 +633,12 @@ def main() -> None:
         if not str(args.input_dir).strip():
             print("[ERROR] --auto 需指定 --input-dir", file=sys.stderr)
             sys.exit(2)
+        if not args.img and not args.txt:
+            print(
+                "[ERROR] 批量模式须至少开启 --img 或 --txt",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         in_dir = Path(args.input_dir).expanduser()
         in_dir = in_dir.resolve() if in_dir.is_absolute() else (REPO_ROOT / in_dir).resolve()
         if args.show:
@@ -603,12 +648,22 @@ def main() -> None:
             cfg,
             out_dir=DEFAULT_VIS_OUTPUT_DIR,
             recursive=args.recursive,
+            save_img=args.img,
+            save_txt=args.txt,
         )
         print(f"[DONE] 成功 {ok}，失败 {n_fail}，目录 {DEFAULT_VIS_OUTPUT_DIR}")
         return
 
-    out = predict_components(args.image, cfg)
-    vis = out["vis_bgr"]
+    if not args.img and not args.txt and not args.show:
+        print(
+            "[ERROR] 须至少开启 --img、--txt 之一，或使用 --show",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    need_vis = args.img or args.show
+    out = predict_components(args.image, cfg, return_vis=need_vis)
+
     img_in = Path(args.image).resolve()
 
     out_base = DEFAULT_VIS_OUTPUT_DIR
@@ -623,13 +678,30 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     import cv2
 
-    if not cv2.imwrite(str(out_path), vis):
-        raise RuntimeError(f"写入失败: {out_path}")
-    print(f"[OK] 已保存: {out_path}")
+    ih, iw = out["image_bgr"].shape[:2]
+    if args.txt:
+        txt_p = out_path.parent / f"{img_in.stem}.txt"
+        write_yolo_labels_txt(
+            txt_p,
+            out["class_ids"],
+            out["boxes_xyxy"],
+            iw,
+            ih,
+        )
+        print(f"[OK] 已保存标签: {txt_p}")
+
+    if args.img:
+        if out["vis_bgr"] is None:
+            raise RuntimeError("内部错误：未生成可视化图")
+        if not cv2.imwrite(str(out_path), out["vis_bgr"]):
+            raise RuntimeError(f"写入失败: {out_path}")
+        print(f"[OK] 已保存: {out_path}")
     print(f"[INFO] 检测数: {out['boxes_xyxy'].shape[0]}")
 
     if args.show:
-        cv2.imshow("components", vis)
+        if out["vis_bgr"] is None:
+            raise RuntimeError("内部错误：--show 需要可视化图")
+        cv2.imshow("components", out["vis_bgr"])
         print("[INFO] 按键关闭窗口…")
         cv2.waitKey(0)
         cv2.destroyAllWindows()

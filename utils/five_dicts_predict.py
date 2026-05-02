@@ -29,6 +29,8 @@ import numpy as np
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors as ultra_colors
 
+from yolo_label_export import write_yolo_labels_txt
+
 if TYPE_CHECKING:
     from ultralytics.engine.results import Results
 
@@ -257,14 +259,18 @@ def predict_five_dicts(
     *,
     repo_root: Path | None = None,
     model: YOLO | None = None,
+    return_vis: bool = True,
 ) -> dict[str, Any]:
     """
     对单张截图推理并后处理，返回结构化结果（含可视化用 BGR 图与框）。
 
+    Args:
+        return_vis: 为 False 时不绘制检测框（``vis_bgr`` 为 ``None``），仅返回数组结果。
+
     Returns:
         dict 包含:
           - image_bgr: 原图 BGR
-          - vis_bgr: 绘制后的 BGR
+          - vis_bgr: 绘制后的 BGR；若 ``return_vis`` 为 False 则为 ``None``
           - boxes_xyxy, scores, class_ids
           - names: 模型类别名列表
           - result_raw: 原始 ultralytics Results（单张时的第一个元素）
@@ -331,7 +337,10 @@ def predict_five_dicts(
         keep = dedupe_one_per_class(xyxy, conf, cls)
         xyxy, conf, cls = xyxy[keep], conf[keep], cls[keep]
 
-    vis_bgr = draw_boxes_bgr(image_bgr, xyxy, cls, conf, names)
+    if return_vis:
+        vis_bgr = draw_boxes_bgr(image_bgr, xyxy, cls, conf, names)
+    else:
+        vis_bgr = None
 
     return {
         "image_bgr": image_bgr,
@@ -373,6 +382,8 @@ def auto_predict_five_dicts_folder(
     out_dir: Path | None = None,
     repo_root: Path | None = None,
     recursive: bool = False,
+    save_img: bool = True,
+    save_txt: bool = False,
 ) -> tuple[int, int]:
     """
     遍历指定文件夹下的图片，逐张执行五分区检测，可视化结果写入 ``out_dir``。
@@ -383,6 +394,8 @@ def auto_predict_five_dicts_folder(
         out_dir: 输出根目录；默认 ``DEFAULT_VIS_OUTPUT_DIR``（即 ``output/level1``）。
         repo_root: 解析相对权重路径用。
         recursive: 是否递归子目录。
+        save_img: 是否保存 ``*_five_dicts_vis`` 图片。
+        save_txt: 是否保存与源图同 ``stem`` 的 YOLO 格式 ``.txt``。
 
     Returns:
         (成功写入数, 失败数)。
@@ -419,14 +432,31 @@ def auto_predict_five_dicts_folder(
                 cfg,
                 repo_root=root,
                 model=model,
+                return_vis=save_img,
             )
             suf = img_path.suffix or ".png"
-            out_path = dest / f"{img_path.stem}_five_dicts_vis{suf}"
-            if not cv2.imwrite(str(out_path), out["vis_bgr"]):
-                raise RuntimeError(f"cv2.imwrite 失败: {out_path}")
+            if save_txt:
+                ih, iw = out["image_bgr"].shape[:2]
+                write_yolo_labels_txt(
+                    dest / f"{img_path.stem}.txt",
+                    out["class_ids"],
+                    out["boxes_xyxy"],
+                    iw,
+                    ih,
+                )
+            if save_img:
+                assert out["vis_bgr"] is not None
+                out_path = dest / f"{img_path.stem}_five_dicts_vis{suf}"
+                if not cv2.imwrite(str(out_path), out["vis_bgr"]):
+                    raise RuntimeError(f"cv2.imwrite 失败: {out_path}")
             n_ok += 1
+            parts = []
+            if save_img:
+                parts.append(f"{img_path.stem}_five_dicts_vis{suf}")
+            if save_txt:
+                parts.append(f"{img_path.stem}.txt")
             print(
-                f"[OK] {img_path.name} -> {out_path.name} "
+                f"[OK] {img_path.name} -> {' + '.join(parts)} "
                 f"(det={out['boxes_xyxy'].shape[0]})"
             )
         except Exception as e:  # noqa: BLE001 — 批量任务单张失败不中断
@@ -474,6 +504,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="保存后尝试用 OpenCV 弹窗显示（需要 GUI 环境）",
     )
+    p.add_argument(
+        "--img",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="保存带框可视化图片（默认开启；仅要 txt 时可加 --no-img）",
+    )
+    p.add_argument(
+        "--txt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="保存 YOLO 格式标签 txt（class xc yc w h 归一化；与源图 stem 同名）",
+    )
     batch = p.add_argument_group("批量模式")
     batch.add_argument(
         "--auto",
@@ -509,6 +551,12 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+        if not args.img and not args.txt:
+            print(
+                "[ERROR] 批量模式须至少开启 --img 或 --txt",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         in_dir = Path(args.input_dir).expanduser()
         if not in_dir.is_absolute():
             in_dir = (REPO_ROOT / in_dir).resolve()
@@ -523,12 +571,21 @@ def main() -> None:
             cfg,
             out_dir=DEFAULT_VIS_OUTPUT_DIR,
             recursive=args.recursive,
+            save_img=args.img,
+            save_txt=args.txt,
         )
         print(f"[DONE] 批量完成：成功 {ok}，失败 {n_fail}，输出目录 {DEFAULT_VIS_OUTPUT_DIR}")
         return
 
-    out = predict_five_dicts(args.image, cfg)
-    vis = out["vis_bgr"]
+    if not args.img and not args.txt and not args.show:
+        print(
+            "[ERROR] 须至少开启 --img、--txt 之一，或使用 --show",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    need_vis = args.img or args.show
+    out = predict_five_dicts(args.image, cfg, return_vis=need_vis)
 
     img_in = Path(args.image).resolve()
     out_dir = DEFAULT_VIS_OUTPUT_DIR
@@ -544,16 +601,34 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     import cv2
 
-    if not cv2.imwrite(str(out_path), vis):
-        raise RuntimeError(f"写入失败: {out_path}")
-    print(f"[OK] 已保存可视化: {out_path}")
+    ih, iw = out["image_bgr"].shape[:2]
+    if args.txt:
+        txt_p = out_path.parent / f"{img_in.stem}.txt"
+        write_yolo_labels_txt(
+            txt_p,
+            out["class_ids"],
+            out["boxes_xyxy"],
+            iw,
+            ih,
+        )
+        print(f"[OK] 已保存标签: {txt_p}")
+
+    if args.img:
+        if out["vis_bgr"] is None:
+            raise RuntimeError("内部错误：未生成可视化图")
+        if not cv2.imwrite(str(out_path), out["vis_bgr"]):
+            raise RuntimeError(f"写入失败: {out_path}")
+        print(f"[OK] 已保存可视化: {out_path}")
+
     print(
         f"[INFO] 检测数: {out['boxes_xyxy'].shape[0]}  "
         f"类别映射: {out['names']}"
     )
 
     if args.show:
-        cv2.imshow("five_dicts", vis)
+        if out["vis_bgr"] is None:
+            raise RuntimeError("内部错误：--show 需要可视化图")
+        cv2.imshow("five_dicts", out["vis_bgr"])
         print("[INFO] 按任意键关闭窗口…")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
