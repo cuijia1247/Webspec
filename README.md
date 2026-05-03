@@ -1,6 +1,6 @@
 # Web UI 视觉相似度工具（WebSpec）
 
-本仓库用于对 **Web UI 截图/设计稿** 进行 **视觉相似度**、**布局结构相似度** 与 **组件框级匹配（CS）** 等计算，以及从 SCUT 目录按主文件名过滤拷贝等数据整理工作。
+本仓库用于对 **Web UI 截图/设计稿** 进行 **视觉相似度**、**布局结构相似度**、**组件框级匹配（CS）**、**内容相关组件 OCR 文本双向指标** 等计算，以及从 SCUT 目录按主文件名过滤拷贝等数据整理工作。
 
 **运行前请在项目根目录 `Webspec/` 下打开终端**（所有相对路径 `./pretrainedModels`、`./data`、`./output` 均基于此）。
 
@@ -20,7 +20,8 @@
    - [7. Level-2 组件分区检测](#7-level-2-组件分区检测-utilsregion_predictpy)
    - [8. 布局相似度 LS](#8-布局相似度-ls-layout_similarity_calculationpy)
    - [9. 组件相似度 CS](#9-组件相似度-cs-component_similarity_calculationpy)
-   - [10. 布局类别说明](#10-布局类别说明-utilsui_layout_instructionyaml)
+   - [10. 文本内容相似度](#10-文本内容相似度-content_similarity_calculationpy)
+   - [11. 布局类别说明](#11-布局类别说明-utilsui_layout_instructionyaml)
 4. [方法简介](#方法简介)
 5. [仓库结构](#仓库结构)
 
@@ -36,6 +37,9 @@ pip install transformers huggingface_hub
 # YOLO 检测与布局相似度
 pip install ultralytics opencv-python pyyaml
 pip install zss          # 布局树编辑距离（layout_similarity_calculation.py）
+
+# 文本内容相似度 content_similarity_calculation.py（EasyOCR + Marian + 可选 ST）
+pip install easyocr langdetect sentence-transformers transformers sentencepiece torch
 ```
 
 > **Ultralytics 版本注意**：`pretrainedModels/level2/best.pt` 等较新权重依赖新版架构（如 `C3k2`）。
@@ -59,10 +63,13 @@ pip install zss          # 布局树编辑距离（layout_similarity_calculation
 | `pretrainedModels/level1/best.ptt` | Level-1 五分区 YOLO 权重 |
 | `pretrainedModels/level2/best.pt` | Level-2 `comp_*` 五类分区 YOLO 权重 |
 | `pretrainedModels/yolo/models/best.pt` | UI 组件 YOLO 权重（vendored ultralytics） |
+| `pretrainedModels/easyocr/` | EasyOCR 权重（默认仅本地、`--easyocr-allow-download` 才联网） |
+| `pretrainedModels/helsinki-mt/opus-mt-zh-en/` | Helsinki Marian 中→英（可选离线放置） |
+| `pretrainedModels/all-MiniLM-L6-v2/` 等 | SentenceTransformer 快照（可选；失败则 difflib） |
 
-首次运行需联网下载；国内可用 `--hf_endpoint https://hf-mirror.com`（CLIP）或 `--proxy http://127.0.0.1:7890`。
+**说明**：旧脚本 **`content_similarity_calculation_ocr.py`**（整图 OCR 相似度）**已暂时作废**，请勿直接运行；逻辑由 **`content_similarity_calculation.py`** 承接（组件级 OCR），模块文件仍被后者 import。
 
----
+首次运行部分模型需联网下载；国内可用 `--hf_endpoint https://hf-mirror.com`（CLIP）或 `--proxy http://127.0.0.1:7890`。EasyOCR / Helsinki 可按脚本说明放入本地目录以实现离线。
 
 ## 脚本运行说明
 
@@ -370,7 +377,42 @@ python component_similarity_calculation.py --dir
 
 ---
 
-### 10. 布局类别说明（`utils/ui_layout_instruction.yaml`）
+### 10. 文本内容相似度（`content_similarity_calculation.py`）
+
+对 **内容相关 UI 组件类别**（YOLO id：`0, 5, 7, 8, 11`，见 `ui_tag_data.yaml`）检测框裁剪后 **EasyOCR**，**中文→英文** 使用本地 **Helsinki-NLP Marian**（`opus-mt-zh-en`）；**不使用 Google 翻译**。计算 **con_preserve**、**con_relevant** 与 **con_s**，结果写入 **`content_result.md`**。
+
+**单图对**：
+
+```bash
+python content_similarity_calculation.py -s path/source.png -t path/target.jpg
+```
+
+默认报告：**`output/content_similarity/content_result.md`**。
+
+**`--dir` 文件夹批量**（与 CS 脚本类似的 `--source-dir` / `--target-dir` stem 配对）：
+
+```bash
+python content_similarity_calculation.py --dir
+```
+
+批量汇总：**`output/content_similarity/content_dir_<source 目录名>/content_result.md`**。
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-s` / `-t` | 与 CS 单图示例一致 | source / target 截图 |
+| `-o` / `--output-dir` | `output/content_similarity` | 输出根目录 |
+| `--iou` | `0.10` | source↔target 同类组件 IoU 匹配阈值 |
+| `--text-sim` | `0.58` | 文本相似度命中阈值 |
+| `--models-root` | `pretrainedModels` | EasyOCR / Marian / ST 等资源根 |
+| `--easyocr-allow-download` | 关闭 | 无本地 EasyOCR 权重时才允许官方下载 |
+| `--offline-st` | — | 不加载 SentenceTransformer（difflib） |
+| `--dir`、`--source-dir`、`--target-dir` | 与 `component_similarity_calculation.py` 批量默认对齐 | 文件夹批量 |
+
+> **`content_similarity_calculation_ocr.py`**：**暂时作废**，勿执行 `python content_similarity_calculation_ocr.py`；共享函数仍由 `content_similarity_calculation.py` import。
+
+---
+
+### 11. 布局类别说明（`utils/ui_layout_instruction.yaml`）
 
 集中说明 **level_1**（五分区 class_id 0–4）与 **component**（`ui_tag_data.yaml` 中 49 类 slug / 中文名 / id）的对应关系，供指令生成、标签解析与各预测脚本对齐引用。
 
@@ -385,6 +427,7 @@ python component_similarity_calculation.py --dir
 | DINOv2 | `utils/vs_codino_score.py` | `dinov2_vitb14` | 纹理与细粒度外观更敏感 |
 | 布局树 TED | `layout_similarity_calculation.py` | five_dicts + region_predict + `zss` | 结构差异（overall 含 comp_* 层 + region 层），LS 越小越相似 |
 | 组件框匹配 | `component_similarity_calculation.py` | `components_predict` YOLO | com_tar / com_source 为匹配率，CS 为二者之和（越大越接近） |
+| 内容 OCR 双向指标 | `content_similarity_calculation.py` | YOLO 文本相关类 + EasyOCR + Marian | con_preserve / con_relevant，con_s 为二者之和 |
 
 CLIP / DINOv2 输出 **L2 归一化余弦相似度**（0–1，越大越相似）。布局 **LS** 为树编辑距离之和（越小越相似）；组件 **CS** 为两段匹配率之和（每项约 0–1，**CS** 约 0–2，越大框级组件越对齐）。CLIP 指标与 LS、CS **不宜混比绝对值**。
 
@@ -397,6 +440,8 @@ Webspec/
 ├── layout_similarity_calculation.py   # 布局相似度 LS（overall_ts + region_ts）
 ├── visual_similarity_calculation.py  # CLIP：默认单图对；--dir 按 stem 批量 → Markdown
 ├── component_similarity_calculation.py  # 组件检测双向匹配 CS → output/components/
+├── content_similarity_calculation.py    # 内容组件 OCR + 文本 con_preserve/con_relevant → output/content_similarity/
+├── content_similarity_calculation_ocr.py  # 【暂时作废】仅作库供上者 import，勿直接运行
 ├── utils/
 │   ├── vs_clip_score.py               # 单对 CLIP 相似度
 │   ├── vs_codino_score.py             # 单对 DINOv2 相似度
@@ -414,7 +459,8 @@ Webspec/
 │   ├── level2/                        # Level-2 comp_* 可视化
 │   ├── components/                    # UI 组件可视化、CS 标签与 cs_result.md
 │   ├── layout_similarity/             # LS 计算结果 txt
-│   └── visual_similarity/             # CLIP 报表 .md
+│   ├── visual_similarity/             # CLIP 报表 .md
+│   └── content_similarity/            # 文本内容相似度 content_result.md
 └── results/
     └── visual_similarity/             # 归档的 CLIP 报表（已纳入 Git）
 ```
